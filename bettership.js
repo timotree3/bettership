@@ -32,7 +32,7 @@ function Player(name, button_prefix, ai_difficulty = null) {
     };
   }
 
-  this.render = function(hide = false) {
+  this.render = function(hide = this.ai_difficulty !== null) {
     for (let i in this.grid.changes) {
       let coords = this.grid.changes[i];
       let new_cell = this.grid.get_cell(coords);
@@ -294,7 +294,7 @@ function click_bots(x, y) {
   if (bot.grid.lost()) {
     winner = user;
   }
-  bot.render(hide = true);
+  bot.render();
   // update color coding after making changes
   refresh_stage();
   bot_turn();

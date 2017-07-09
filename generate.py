@@ -51,7 +51,7 @@ def stage_header():
 def indent(tag, content):
     output = ""
     for line in content.strip("\n").split("\n"):
-        output += "  {}\n".format(line)
+        output += "        {}\n".format(line)
     return opener(tag) + output + closer(tag)
 
 def opener(tag):

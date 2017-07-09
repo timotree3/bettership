@@ -60,6 +60,6 @@ def opener(tag):
 def closer(tag):
     return "</"+tag.split(" ")[0]+">\n"
 
-with open("template.html") as template, open("battleship.html", "w") as outfile:
+with open("template.html") as template, open("bettership.html", "w") as outfile:
     body = indent("body", stage_header()+my_grid()+dpad()+ai_grid())
     outfile.write(template.read(-1).replace("<body></body>\n", body))

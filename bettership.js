@@ -67,22 +67,14 @@ function Grid(size) {
         this.attacks = [];
         this.ships = {};
 
-        this.coords_ok = function(coords) {
-                return coords.x >= 0 && coords.x < this.size && coords.y >= 0 && coords.y < this.size;
-        };
+        this.coords_ok = coords => coords.x >= 0 && coords.x < this.size && coords.y >= 0 && coords.y < this.size;
 
-        this.can_place = function(coords) {
-                return this.coords_ok(coords) && !this.get_cell(coords).hasOwnProperty("ship");
-        };
+        this.can_place = coords => this.coords_ok(coords) && !this.get_cell(coords).hasOwnProperty("ship");
 
-        this.vector_can_place = function(vector) {
-                let values = vector.walk(this.can_place.bind(this));
-                return values.indexOf(false) === -1;
-                // if it never returned false, placement is valid.
-        };
+        this.vector_can_place = vector => Array.from(vector.coords()).every(this.can_place, this);
 
         this.vector_place = function(vector) {
-                vector.walk(function(coords, distance) {
+                Array.from(vector.coords()).forEach(function(coords, distance) {
                         this.set_cell(coords, {
                                 "attacked": false,
                                 "ship": {
@@ -90,11 +82,11 @@ function Grid(size) {
                                         "distance": distance
                                 }
                         });
-                        this.ships[unique(vector.start)] = {
+                        this.ships[serialize(vector.start)] = {
                                 "remaining": vector.magnitude,
                                 "size": vector.magnitude
                         };
-                }.bind(this));
+                }, this);
         };
 
         this.get_cell = function(coords) {
@@ -121,10 +113,8 @@ function Grid(size) {
                 this.changes.push(coords);
         };
 
-        this.can_attack = function(coords) {
-                return this.coords_ok(coords) && !this.get_cell(coords).attacked;
-                // Must be in bounds && Can't attack the same spot twice
-        };
+        this.can_attack = coords => this.coords_ok(coords) && !this.get_cell(coords).attacked;
+        // Must be in bounds && Can't attack the same spot twice
 
         this.attack = function(coords) {
                 this.sunk = 0;
@@ -134,35 +124,28 @@ function Grid(size) {
                 this.attacks.push(coords);
                 if (cell.hasOwnProperty("ship")) {
                         let start = travel(coords, invert(cell.ship.direction), cell.ship.distance);
-                        this.ships[unique(start)].remaining--;
-                        if (this.ships[unique(start)].remaining == 0) {
-                                this.sunks.push(this.ships[unique(start)].size);
-                                delete this.ships[unique(start)];
+                        let serialized = serialize(start);
+                        this.ships[serialized].remaining--;
+                        if (this.ships[serialized].remaining == 0) {
+                                this.sunks.push(this.ships[serialized].size);
+                                delete this.ships[serialized];
                         }
                 }
         };
-        
-        this.lost = function() {
-                return Object.keys(this.ships).length == 0;
-        };
+
+        this.lost = () => Object.keys(this.ships).length == 0;
 }
 
-function Vector(start, direction, magnitude) {
-        this.shifts = 0;
+function Vector(start, direction, magnitude, skip = 0) {
+        this.skip = skip;
         this.start = start;
         this.direction = direction;
         this.magnitude = magnitude;
 
-        this.shift = function() {
-                return travel(this.start, this.direction, this.shifts);
-        };
-
-        this.walk = function(func) {
-                let values = [];
-                for (this.shifts = 0; this.shifts < this.magnitude; this.shifts++) {
-                        values.push(func(this.shift(), this.shifts));
+        this.coords = function*() {
+                for (let shifts = this.skip; shifts < this.magnitude; shifts++) {
+                        yield travel(this.start, this.direction, shifts);
                 }
-                return values;
         };
 }
 
@@ -170,16 +153,11 @@ function Scanner(start, distance) {
         this.start = start;
         this.magnitude = distance + 1;
 
-        this.walk = function(func) {
-                let exclude = function(coords, steps) {
-                        if (steps != 0) {
-                                return func(coords, steps);
-                        }
-                }.bind(this);
-                new Vector(this.start, "up", this.magnitude).walk(exclude);
-                new Vector(this.start, "left", this.magnitude).walk(exclude);
-                new Vector(this.start, "right", this.magnitude).walk(exclude);
-                new Vector(this.start, "down", this.magnitude).walk(exclude);
+        this.coords = function*() {
+                yield* new Vector(this.start, "up", this.magnitude, 1).coords();
+                yield* new Vector(this.start, "left", this.magnitude, 1).coords();
+                yield* new Vector(this.start, "right", this.magnitude, 1).coords();
+                yield* new Vector(this.start, "down", this.magnitude, 1).coords();
         };
 }
 
@@ -221,8 +199,15 @@ function invert(direction) {
         }
 }
 
-function unique(coords) {
+function serialize(coords) {
         return coords.y * grid_length + coords.x;
+}
+
+function deserialize(serialized) {
+        return {
+                "x": serialized % grid_length,
+                "y": Math.floor(serialized / grid_length)
+        };
 }
 
 function ship_name(ship_length) {
@@ -339,6 +324,7 @@ function bot_turn() {
         bot_attack();
         if (user.grid.lost()) {
                 winner = bot;
+                show_ships(bot);
         }
 
         user.render();
@@ -360,11 +346,22 @@ function bot_attack() {
         user.grid.attack(coords);
         if (difficulty != "easy") {
                 if (user.grid.get_cell(coords).hasOwnProperty("ship")) {
-                        new Scanner(coords, 1).walk(function(coords) {
-                                bot.interests[1].push(coords);
-                        }.bind(this));
+                        for (let adjacents of new Scanner(coords, 1).coords()) {
+                                bot.interests[1].push(adjacents);
+                        }
                 }
         }
+}
+
+function show_ships(player) {
+        for (let serialized in player.grid.ships) {
+                let ship = player.grid.ships[serialized];
+                let coords = deserialize(serialized);
+                let direction = player.grid.get_cell(coords).ship.direction;
+                let vector = new Vector(coords, direction, ship.size);
+                player.grid.changes = player.grid.changes.concat(Array.from(vector.coords()));
+        }
+        player.render(false);
 }
 
 function refresh_stage() {

@@ -1,8 +1,15 @@
 /*jshint esversion: 6 */
 
-const grid_length = 10;
-const ship_list = [5, 4, 3, 3, 2];
-const difficulty = "medium";
+const grid_length = 10,
+        ship_list = [5, 4, 3, 3, 2];
+const easy = 0,
+        medium = 1,
+        hard = 2;
+const difficulty = medium;
+var up = 0,
+        left = 1,
+        right = 2,
+        down = 3;
 
 function Player(name, button_prefix, ai_difficulty = null) {
         this.name = name;
@@ -18,14 +25,17 @@ function Player(name, button_prefix, ai_difficulty = null) {
                         "2": []
                 };
                 this.best = function() {
+                        if (this.ai_difficulty === easy) {
+                                return random_coords();
+                        }
                         if (this.interests[2].length != 0) {
-                                return this.interests[2].splice(0, 1)[0];
+                                return pop(this.interests[2], 0);
                         }
                         if (this.interests[1].length != 0) {
-                                return this.interests[1].splice(0, 1)[0];
+                                return pop(this.interests[1], 0);
                         }
                         let coords = random_coords();
-                        while (this.ai_difficulty === "hard" && this.interests[-1].indexOf(coords) > -1) {
+                        while (this.ai_difficulty === hard && this.interests[-1].includes(coords)) {
                                 coords = random_coords();
                         }
                         return coords;
@@ -44,18 +54,18 @@ function Player(name, button_prefix, ai_difficulty = null) {
                         } else {
                                 contents = new_cell.hasOwnProperty("ship") ? "ship" : "water";
                         }
-                        this.button_element(coords).style.backgroundColor = "var(--" + status + "-" + contents + ")";
+                        this.button_element(coords).style.backgroundColor = `var(--${status}-${contents})`;
                 }
                 this.grid.changes = [];
                 for (let i in this.grid.sunks) {
                         let length = this.grid.sunks[i];
-                        alert("The " + ship_name(length) + " owned by " + this.name + " is gone!");
+                        alert(`The ${ship_name(length)} owned by ${this.name} is gone!`);
                 }
                 this.grid.sunks = [];
         };
 
         this.button_element = function(coords) {
-                return document.getElementById(this.button_prefix + "(" + coords.x + "," + coords.y + ")");
+                return document.getElementById(`${this.button_prefix}(${coords.x},${coords.y})`);
         };
 }
 
@@ -90,6 +100,9 @@ function Grid(size) {
         };
 
         this.get_cell = function(coords) {
+                if (!this.coords_ok(coords)) {
+                        return;
+                }
                 // create the row if needed
                 if (!this.grid.hasOwnProperty(coords.x)) {
                         this.grid[coords.x] = [];
@@ -123,6 +136,7 @@ function Grid(size) {
                 this.set_cell(coords, cell);
                 this.attacks.push(coords);
                 if (cell.hasOwnProperty("ship")) {
+                        // if it's a hit
                         let start = travel(coords, invert(cell.ship.direction), cell.ship.distance);
                         let serialized = serialize(start);
                         this.ships[serialized].remaining--;
@@ -136,49 +150,54 @@ function Grid(size) {
         this.lost = () => Object.keys(this.ships).length == 0;
 }
 
-function Vector(start, direction, magnitude, skip = 0) {
-        this.skip = skip;
+function* ray(start, direction, last, skip = 0) {
+        let shifts = skip,
+                coords = travel(start, direction, shifts);
+        yield coords;
+        while (!last(coords, shifts)) {
+                shifts++;
+                coords = travel(start, direction, shifts);
+                yield coords;
+        }
+}
+
+function Vector(start, direction, magnitude) {
         this.start = start;
         this.direction = direction;
         this.magnitude = magnitude;
 
-        this.coords = function*() {
-                for (let shifts = this.skip; shifts < this.magnitude; shifts++) {
-                        yield travel(this.start, this.direction, shifts);
-                }
+        this.coords = function*(skip = 0) {
+                last = (coords, shifts) => shifts === this.magnitude - 1;
+                yield* ray(this.start, this.direction, last, skip = skip);
         };
 }
 
-function Scanner(start, distance) {
-        this.start = start;
-        this.magnitude = distance + 1;
-
-        this.coords = function*() {
-                yield* new Vector(this.start, "up", this.magnitude, 1).coords();
-                yield* new Vector(this.start, "left", this.magnitude, 1).coords();
-                yield* new Vector(this.start, "right", this.magnitude, 1).coords();
-                yield* new Vector(this.start, "down", this.magnitude, 1).coords();
-        };
+function* scan(start, distance) {
+        let magnitude = distance + 1;
+        yield* new Vector(start, up, magnitude).coords(1);
+        yield* new Vector(start, left, magnitude).coords(1);
+        yield* new Vector(start, right, magnitude).coords(1);
+        yield* new Vector(start, down, magnitude).coords(1);
 }
 
 function travel(coords, direction, distance) {
         switch (direction) {
-                case "up":
+                case up:
                         return {
                                 "x": coords.x,
                                 "y": coords.y - distance
                         };
-                case "left":
+                case left:
                         return {
                                 "x": coords.x - distance,
                                 "y": coords.y
                         };
-                case "right":
+                case right:
                         return {
                                 "x": coords.x + distance,
                                 "y": coords.y
                         };
-                case "down":
+                case down:
                         return {
                                 "x": coords.x,
                                 "y": coords.y + distance
@@ -188,14 +207,35 @@ function travel(coords, direction, distance) {
 
 function invert(direction) {
         switch (direction) {
-                case "up":
-                        return "down";
-                case "left":
-                        return "right";
-                case "right":
-                        return "left";
-                case "down":
-                        return "up";
+                case up:
+                        return down;
+                case left:
+                        return right;
+                case right:
+                        return left;
+                case down:
+                        return up;
+        }
+}
+
+function opposite(center, coords) {
+        return {
+                "x": center.x + (center.x - coords.x),
+                "y": center.y + (center.y - coords.y)
+        };
+}
+
+function travelled(center, coords) {
+        let distance_x = coords.x - center.x,
+                distance_y = coords.y - center.y;
+        if (distance_y < 0) {
+                return up;
+        } else if (distance_x < 0) {
+                return left;
+        } else if (distance_x > 0) {
+                return right;
+        } else if (distance_y > 0) {
+                return down;
         }
 }
 
@@ -227,10 +267,14 @@ function ship_name(ship_length) {
         }
 }
 
+function pop(array, index) {
+        return array.splice(index, 1)[0];
+}
+
 var winner = null;
 var user = new Player("you", "click_mine");
 var bot = new Player("the bot", "click_bots", difficulty);
-// {"attacked": bool, "ship": {"direction": "up"|"left"|"right"|"down", "distance": uint}}
+// {"attacked": bool, "ship": {"direction": up|left|right|down, "distance": uint}}
 
 window.onload = function() {
         bot_place_all();
@@ -248,10 +292,12 @@ function click_mine(x, y) {
         if (direction === null) {
                 return;
         }
+        debug("direction", direction);
         vector = new Vector({
                 "x": x,
                 "y": y
         }, direction, user.place_queue[0]);
+        debug("vector", Array.from(vector.coords()));
         if (!user.grid.vector_can_place(vector)) {
                 return;
         }
@@ -291,7 +337,7 @@ function click_bots(x, y) {
 
 function read_dpad() {
         let checked = document.querySelector('input[name = "direction"]:checked');
-        return checked === null ? null : checked.value;
+        return checked === null ? null : window[checked.value];
 }
 
 function random_coords(bound = grid_length) {
@@ -302,7 +348,7 @@ function random_coords(bound = grid_length) {
 }
 
 function random_vector(magnitude) {
-        return new Vector(random_coords(), ["up", "left", "right", "down"][Math.floor(Math.random() * 4)], magnitude);
+        return new Vector(random_coords(), [up, left, right, down][Math.floor(Math.random() * 4)], magnitude);
 }
 
 function bot_place(magnitude) {
@@ -318,6 +364,7 @@ function bot_place_all() {
                 bot_place(bot.place_queue[i]);
         }
         bot.place_queue = [];
+        bot.render();
 }
 
 function bot_turn() {
@@ -333,21 +380,23 @@ function bot_turn() {
 }
 
 function bot_attack() {
-        let move;
-        if (difficulty == "easy") {
-                move = random_coords;
-        } else {
-                move = bot.best.bind(bot);
-        }
+        let move = bot.best.bind(bot);
         let coords = move();
         while (!user.grid.can_attack(coords)) {
                 coords = move();
         }
         user.grid.attack(coords);
-        if (difficulty != "easy") {
-                if (user.grid.get_cell(coords).hasOwnProperty("ship")) {
-                        for (let adjacents of new Scanner(coords, 1).coords()) {
-                                bot.interests[1].push(adjacents);
+        if (difficulty != easy) {
+                let cell = user.grid.get_cell(coords);
+                if (cell.hasOwnProperty("ship")) {
+                        for (let adjacent of scan(coords, 1)) {
+                                bot.interests[1].push(adjacent);
+                                if (cell.attacked) {
+                                        let direction = travelled(coords, adjacent);
+                                        let last = coords => user.grid.coords_ok(coords) && !user.grid.get_cell(coords).attacked
+                                        for (cell of ray(adjacent, direction, coords => user.grid.coords_ok(coords)))
+                                        bot.interests[2].push(opposite(coords, adjacent));
+                                }
                         }
                 }
         }
@@ -379,4 +428,8 @@ function refresh_stage() {
                 header = "Congratulations, AI! You won!";
         }
         document.getElementById("stage_header").innerHTML = header;
+}
+
+function debug(name, obj) {
+        console.log(`${name}: ${JSON.stringify(obj)}`);
 }
